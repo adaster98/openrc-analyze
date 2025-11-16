@@ -1,3 +1,5 @@
+![Screenshot of tool](https://media.discordapp.net/attachments/1087338689883017217/1439633784575365120/image.png?ex=691b3af1&is=6919e971&hm=bce1413fe38b942ad485c90c789a13aec16412a4ca3fe92743d5b85496ad3219&=&format=webp&quality=lossless)
+
 ## What it does:
 This is a tool I made for OpenRC which replicates the functionality of the "systemd-analyze" command, for the most part.
 
