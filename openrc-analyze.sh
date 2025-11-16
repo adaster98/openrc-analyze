@@ -5,7 +5,7 @@
 
 detect_resume() {
     # Check if system was resumed from hibernation or suspend
-    if dmesg | grep -q "PM: hibernation exit\|PM: suspend exit"; then
+    if dmesg | grep -q "PM: hibernation: hibernation exit\|PM: suspend exit"; then
         echo "resume"
     else
         echo "cold"
