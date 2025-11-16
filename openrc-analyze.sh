@@ -4,8 +4,8 @@
 # Using dmesg timestamps and ACPI FPDT data
 
 detect_resume() {
-    # Check if system was resumed from hibernation or suspend
-    if dmesg | grep -q "PM: hibernation: hibernation exit\|PM: suspend exit"; then
+    # Check if system was resumed from hibernation
+    if dmesg | grep -q "PM: hibernation: hibernation exit"; then
         echo "resume"
     else
         echo "cold"
@@ -173,7 +173,7 @@ if [ $errors -eq 0 ]; then
     # Show resume notice if applicable
     if [ "$boot_type" = "resume" ]; then
         echo ""
-        echo "Note: System was resumed from suspend/hibernation."
+        echo "Note: System was resumed from hibernation."
         echo "Firmware and loader times reflect resume initialization."
     fi
 else
