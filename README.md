@@ -13,3 +13,6 @@ I'd like to find a way to replace this functionality. I'm looking into using RC 
 
 ## Requirements:
 The only 2 requirements is that your running OpenRC and using elogind. Once I have time to change how userspace is detected, elogind won't be required.
+
+## Bugs:
+If user hibernates their system, it will pull the firmware and loader stats from the *last* boot, not the original boot.
