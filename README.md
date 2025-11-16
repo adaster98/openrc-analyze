@@ -8,3 +8,6 @@ The rest of the times are pulled from DMESG which has a tendancy to be inaccurat
 ## Future plans:
 Right now, DMESG doesn't provide a good way to detect when userspace is reached, so i'm using the elogind service as an indicator for when that happens. This isn't nessesarily that inaccurate, but it's not the best either.
 I'd like to find a way to replace this functionality. I'm looking into using RC Log instead with verbose logging to see if I can pull times from that.
+
+## Requirements:
+The only 2 requirements is that your running OpenRC and using elogind. Once I have time to change how userspace is detected, elogind won't be required.
