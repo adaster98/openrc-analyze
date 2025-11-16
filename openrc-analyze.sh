@@ -3,6 +3,15 @@
 # OpenRC systemd-analyze equivalent script
 # Using dmesg timestamps and ACPI FPDT data
 
+detect_resume() {
+    # Check if system was resumed from hibernation or suspend
+    if dmesg | grep -q "PM: hibernation:\|PM: suspend:"; then
+        echo "resume"
+    else
+        echo "cold"
+    fi
+}
+
 get_firmware_time() {
     # Firmware time: from power-on to bootloader launch
     local bootloader_launch_ns=0
@@ -104,8 +113,20 @@ get_userspace_time() {
 }
 
 # Main execution
-echo "OpenRC Analyze :3"
+echo "Bootup performance statistics:"
 echo "==============================="
+
+# Detect if this is a cold boot or resume
+boot_type=$(detect_resume)
+
+# Set labels based on boot type
+if [ "$boot_type" = "resume" ]; then
+    firmware_label="firmware on-resume"
+    bootloader_label="loader on-resume"
+else
+    firmware_label="firmware"
+    bootloader_label="loader"
+fi
 
 # Collect all times with error handling
 errors=0
@@ -138,14 +159,23 @@ fi
 # Calculate total time only if all components are available
 if [ $errors -eq 0 ]; then
     total_time=$(echo "scale=3; $firmware_time + $bootloader_time + $kernel_time + $initramfs_time + $userspace_time" | bc -l 2>/dev/null)
-    # Format output like systemd-analyze
-    printf "Startup finished in %.3fs (firmware) + %.3fs (loader) + %.3fs (kernel) + %.3fs (initramfs) + %.3fs (userspace) = %.2fs\n" \
+    # Format output like systemd-analyze with appropriate labels
+    printf "Startup finished in %.3fs (%s) + %.3fs (%s) + %.3fs (kernel) + %.3fs (initramfs) + %.3fs (userspace) = %.2fs\n" \
            "$firmware_time" \
+           "$firmware_label" \
            "$bootloader_time" \
+           "$bootloader_label" \
            "$kernel_time" \
            "$initramfs_time" \
            "$userspace_time" \
            "$total_time"
+
+    # Show resume notice if applicable
+    if [ "$boot_type" = "resume" ]; then
+        echo ""
+        echo "Note: System was resumed from suspend/hibernation."
+        echo "Firmware and loader times reflect resume initialization."
+    fi
 else
     echo "ERROR: Could not calculate boot times. Missing data:"
     [ "$firmware_time" = "ERROR" ] && echo "  - Firmware time"
