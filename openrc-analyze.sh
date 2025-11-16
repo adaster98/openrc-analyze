@@ -113,7 +113,7 @@ get_userspace_time() {
 }
 
 # Main execution
-echo "Bootup performance statistics:"
+echo "OpenRC Analyze :3"
 echo "==============================="
 
 # Detect if this is a cold boot or resume
