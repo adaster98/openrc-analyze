@@ -25,3 +25,5 @@ Then use `sudo openrc-analyze`
 ## Bugs:
 ~~If user hibernates their system, it will pull the firmware and loader stats from the *last* boot, not the original boot.~~
 Part-fixed: Script will now detect a resumed session and indentify times as such.
+
+After system has been running for a while, or after many alterations, the dmesg file gets filled and overflows to a new page causing the script to break.
