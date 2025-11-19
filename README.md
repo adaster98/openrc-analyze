@@ -31,7 +31,9 @@ EDIT: Script will now detect a resumed session and label the new times as (on-re
 [2] After system has been running for a while, or after many alterations, the dmesg file gets filled and overflows to a new page causing the script to break.
 
 [3] One Gentoo user found that init system path was /sbin/init vs /user/bin/init causing the dmsg grep to fail. A possible cause for this is chosing a non-desktop profile.
+
 EDIT: Fix for this in testing branch
 
 [4] If a user doesn't have an initramfs, the script fails.
+
 EDIT: Fix for this in testing branch
