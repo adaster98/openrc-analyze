@@ -77,22 +77,37 @@ get_bootloader_time() {
 
 get_kernel_time() {
     # Kernel starts at dmesg timestamp 0.000
-    # Kernel ends when early userspace/initramfs starts
+    # Kernel ends when early userspace/initramfs starts OR when userspace starts if no initramfs
+
+    # First, check for initramfs start (this is the primary kernel end marker)
     local early_userspace_start=$(dmesg | grep -i "Run /init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+
+    # If no initramfs start found, then kernel ends when userspace starts directly
+    if [ -z "$early_userspace_start" ]; then
+        early_userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+    fi
 
     if [ -n "$early_userspace_start" ]; then
         echo $early_userspace_start
     else
-        echo "ERROR: Cannot find 'Run /init as init process' in dmesg" >&2
+        echo "ERROR: Cannot find kernel end marker in dmesg" >&2
         return 1
     fi
 }
 
 get_initramfs_time() {
     # Initramfs/early userspace starts at "Run /init as init process"
-    # Initramfs ends at "Running init: /usr/bin/init" (handoff to main system)
+    # Initramfs ends at "Running init: /sbin/init" or "Running init: /usr/bin/init" (handoff to main system)
     local initramfs_start=$(dmesg | grep -i "Run /init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
-    local initramfs_end=$(dmesg | grep -i "Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+
+    # If no initramfs start marker found, assume no initramfs
+    if [ -z "$initramfs_start" ]; then
+        echo "0"
+        return 0
+    fi
+
+    # Look for both possible init paths
+    local initramfs_end=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     if [ -n "$initramfs_start" ] && [ -n "$initramfs_end" ]; then
         local duration_s=$(echo "scale=3; $initramfs_end - $initramfs_start" | bc -l 2>/dev/null)
@@ -152,10 +167,10 @@ get_openrc_times() {
 
 get_userspace_time_fallback() {
     # Fallback method: Use elogind service start as userspace completion marker
-    local userspace_start=$(dmesg | grep -i "Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+    local userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     if [ -z "$userspace_start" ]; then
-        echo "ERROR: Cannot find 'Running init: /usr/bin/init' in dmesg" >&2
+        echo "ERROR: Cannot find userspace start marker in dmesg" >&2
         return 1
     fi
 
@@ -248,16 +263,33 @@ else
     openrc_available=0
 fi
 
+# Check if initramfs is actually used
+if [ "$initramfs_time" = "0" ]; then
+    initramfs_used=0
+else
+    initramfs_used=1
+fi
+
 # Calculate total time only if all components are available
 if [ $errors -eq 0 ]; then
-    total_time=$(echo "scale=3; $firmware_time + $bootloader_time + $kernel_time + $initramfs_time + $userspace_time" | bc -l 2>/dev/null)
+    # Adjust total time calculation based on initramfs usage
+    if [ $initramfs_used -eq 1 ]; then
+        total_time=$(echo "scale=3; $firmware_time + $bootloader_time + $kernel_time + $initramfs_time + $userspace_time" | bc -l 2>/dev/null)
+    else
+        total_time=$(echo "scale=3; $firmware_time + $bootloader_time + $kernel_time + $userspace_time" | bc -l 2>/dev/null)
+    fi
 
     # Format output
     printf "Complete Breakdown:\n"
     printf "\u2022 %s: %.3fs\n" "$firmware_label" "$firmware_time"
     printf "\u2022 %s: %.3fs\n" "$bootloader_label" "$bootloader_time"
     printf "\u2022 kernel: %.3fs\n" "$kernel_time"
-    printf "\u2022 initramfs: %.3fs\n" "$initramfs_time"
+
+    if [ $initramfs_used -eq 1 ]; then
+        printf "\u2022 initramfs: %.3fs\n" "$initramfs_time"
+    else
+        printf "\u2022 initramfs: not used\n"
+    fi
 
     if [ $openrc_available -eq 1 ]; then
         printf "\u2022 userspace: %.0fs (boot) + %.0fs (default)\n" "$boot_duration" "$default_duration"
@@ -280,6 +312,12 @@ if [ $errors -eq 0 ]; then
         echo ""
         echo "Note: rc_logger is disabled. Userspace time is estimated from elogind start."
         echo "Enable rc_logger in /etc/rc.conf for verbose runlevel timing."
+    fi
+
+    # Show initramfs notice if not used
+    if [ $initramfs_used -eq 0 ]; then
+        echo ""
+        echo "Note: No initramfs detected. Kernel time includes direct transition to userspace."
     fi
 else
     echo "ERROR: Could not calculate boot times. Missing data:"
