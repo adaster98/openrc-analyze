@@ -13,6 +13,12 @@ detect_resume() {
 }
 
 is_rc_logger_enabled() {
+    # Check if debug argument was passed
+    if [ "${FORCE_ELOGIND:-0}" -eq 1 ]; then
+        echo "disabled"
+        return
+    fi
+
     # Check if rc_logger is enabled in /etc/rc.conf
     if [ -f "/etc/rc.conf" ]; then
         if grep -q '^rc_logger="YES"' /etc/rc.conf || grep -q '^rc_logger="yes"' /etc/rc.conf; then
@@ -98,6 +104,7 @@ get_kernel_time() {
 get_initramfs_time() {
     # Initramfs/early userspace starts at "Run /init as init process"
     # Initramfs ends at "Running init: /sbin/init" or "Running init: /usr/bin/init" (handoff to main system)
+
     local initramfs_start=$(dmesg | grep -i "Run /init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     # If no initramfs start marker found, assume no initramfs
@@ -120,7 +127,6 @@ get_initramfs_time() {
 }
 
 get_openrc_times() {
-    # Get OpenRC runlevel times from rc.log
     local rc_log="/var/log/rc.log"
 
     if [ ! -f "$rc_log" ]; then
@@ -128,45 +134,71 @@ get_openrc_times() {
         return 1
     fi
 
-    # Get the last boot cycle (most recent set of log entries)
-    local boot_start_line=$(grep "rc boot logging started" "$rc_log" | tail -1)
-    local boot_stop_line=$(grep "rc boot logging stopped" "$rc_log" | tail -1)
-    local default_start_line=$(grep "rc default logging started" "$rc_log" | tail -1)
-    local default_stop_line=$(grep "rc default logging stopped" "$rc_log" | tail -1)
+    # 1. Use AWK to scan forward and capture the last *complete* boot sequence.
+    # We use a pipe delimiter (|) to output all lines in one go, which is safer than array splitting.
+    local raw_output
+    raw_output=$(awk '
+        /rc boot logging started/    { bs=$0; b_stop=""; d_start=""; d_stop="" }
+        /rc boot logging stopped/    { b_stop=$0 }
+        /rc default logging started/ { d_start=$0 }
+        /rc default logging stopped/ {
+            d_stop=$0
+            # Only update our "final" variables if we have a full, valid sequence.
+            # This automatically ignores incomplete boot cycles at the end of the file.
+            if (bs && b_stop && d_start && d_stop) {
+                final_bs=bs
+                final_b_stop=b_stop
+                final_d_start=d_start
+                final_d_stop=d_stop
+            }
+        }
+        END {
+            if (final_bs) {
+                print final_bs "|" final_b_stop "|" final_d_start "|" final_d_stop
+            }
+        }
+    ' "$rc_log")
 
-    if [ -z "$boot_start_line" ] || [ -z "$boot_stop_line" ] || [ -z "$default_start_line" ] || [ -z "$default_stop_line" ]; then
-        echo "ERROR: Cannot find complete OpenRC runlevel data in $rc_log" >&2
+    if [ -z "$raw_output" ]; then
+        echo "ERROR: No complete boot cycle found." >&2
         return 1
     fi
 
-    # Extract timestamps
-    local boot_start_time=$(echo "$boot_start_line" | awk '{print $6, $7, $8, $9, $10}')
-    local boot_stop_time=$(echo "$boot_stop_line" | awk '{print $6, $7, $8, $9, $10}')
-    local default_start_time=$(echo "$default_start_line" | awk '{print $6, $7, $8, $9, $10}')
-    local default_stop_time=$(echo "$default_stop_line" | awk '{print $6, $7, $8, $9, $10}')
+    # 2. Read the pipe-delimited string into variables
+    local IFS='|'
+    read -r line_bs line_be line_ds line_de <<< "$raw_output"
+    unset IFS
 
-    # Convert to epoch seconds for calculation
-    local boot_start_epoch=$(date -d "$boot_start_time" +%s 2>/dev/null)
-    local boot_stop_epoch=$(date -d "$boot_stop_time" +%s 2>/dev/null)
-    local default_start_epoch=$(date -d "$default_start_time" +%s 2>/dev/null)
-    local default_stop_epoch=$(date -d "$default_stop_time" +%s 2>/dev/null)
+    # 3. Extract date strings (columns 6-10 correspond to the timestamp format in your log)
+    local date_bs=$(echo "$line_bs" | awk '{print $6, $7, $8, $9, $10}')
+    local date_be=$(echo "$line_be" | awk '{print $6, $7, $8, $9, $10}')
+    local date_ds=$(echo "$line_ds" | awk '{print $6, $7, $8, $9, $10}')
+    local date_de=$(echo "$line_de" | awk '{print $6, $7, $8, $9, $10}')
 
-    if [ -z "$boot_start_epoch" ] || [ -z "$boot_stop_epoch" ] || [ -z "$default_start_epoch" ] || [ -z "$default_stop_epoch" ]; then
-        echo "ERROR: Cannot parse timestamps from OpenRC log" >&2
+    # 4. Convert to epoch seconds
+    local epoch_bs=$(date -d "$date_bs" +%s 2>/dev/null)
+    local epoch_be=$(date -d "$date_be" +%s 2>/dev/null)
+    local epoch_ds=$(date -d "$date_ds" +%s 2>/dev/null)
+    local epoch_de=$(date -d "$date_de" +%s 2>/dev/null)
+
+    # 5. Validate dates
+    if [ -z "$epoch_bs" ] || [ -z "$epoch_be" ] || [ -z "$epoch_ds" ] || [ -z "$epoch_de" ]; then
+        echo "ERROR: Failed to parse OpenRC timestamps." >&2
         return 1
     fi
 
-    # Calculate durations
-    local boot_duration=$((boot_stop_epoch - boot_start_epoch))
-    local default_duration=$((default_stop_epoch - default_start_epoch))
-    local total_userspace=$((default_stop_epoch - boot_start_epoch))
+    # 6. Calculate durations
+    local boot_duration=$((epoch_be - epoch_bs))
+    local default_duration=$((epoch_de - epoch_ds))
+    local total_userspace=$((epoch_de - epoch_bs))
 
-    # Return as comma-separated values: total_userspace,boot_duration,default_duration
+    # 7. Output: total_userspace,boot_duration,default_duration
     echo "$total_userspace,$boot_duration,$default_duration"
 }
 
 get_userspace_time_fallback() {
     # Fallback method: Use elogind service start as userspace completion marker
+
     local userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     if [ -z "$userspace_start" ]; then
@@ -205,6 +237,13 @@ get_userspace_time() {
 }
 
 # Main execution
+
+# Parse argument
+FORCE_ELOGIND=0
+if [ "$1" = "use-elogind" ]; then
+    FORCE_ELOGIND=1
+fi
+
 echo ""
 
 # Detect if this is a cold boot or resume
@@ -274,8 +313,10 @@ fi
 if [ $errors -eq 0 ]; then
     # Adjust total time calculation based on initramfs usage
     if [ $initramfs_used -eq 1 ]; then
+
         total_time=$(echo "scale=3; $firmware_time + $bootloader_time + $kernel_time + $initramfs_time + $userspace_time" | bc -l 2>/dev/null)
     else
+
         total_time=$(echo "scale=3; $firmware_time + $bootloader_time + $kernel_time + $userspace_time" | bc -l 2>/dev/null)
     fi
 
