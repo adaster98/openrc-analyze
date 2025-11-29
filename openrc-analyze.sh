@@ -90,7 +90,7 @@ get_kernel_time() {
 
     # If no initramfs start found, then kernel ends when userspace starts directly
     if [ -z "$early_userspace_start" ]; then
-        early_userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+        early_userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
     fi
 
     if [ -n "$early_userspace_start" ]; then
@@ -113,8 +113,8 @@ get_initramfs_time() {
         return 0
     fi
 
-    # Look for both possible init paths
-    local initramfs_end=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+    # Look for possible init paths
+    local initramfs_end=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     if [ -n "$initramfs_start" ] && [ -n "$initramfs_end" ]; then
         local duration_s=$(echo "scale=3; $initramfs_end - $initramfs_start" | bc -l 2>/dev/null)
