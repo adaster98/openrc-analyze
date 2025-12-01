@@ -3,7 +3,6 @@
 ## What it does:
 This is a tool I made for OpenRC which replicates the functionality of the "systemd-analyze" command, for the most part.
 
-
 ## How it does it:
 Firmware and Loader times are pulled directly from the ACPI Firmware Performance Data Table, so should be accurate.
 Kernel and initramfs times are pulled from DMESG which has a tendancy to be inaccurate over long periods, but for the small duration all the bootup tasks happen, it should be relatively accurate.
@@ -23,17 +22,4 @@ sudo cp openrc-analyze.sh /bin/openrc-analyze
 ```
 Then use `sudo openrc-analyze`
 
-## Bugs:
-[1] ~~If user hibernates their system, it will pull the firmware and loader stats from the *last* boot, not the original boot~~.
-
-EDIT: Script will now detect a resumed session and label the new times as (on-resume).
-
-[2] After system has been running for a while, or after many alterations, the dmesg file gets filled and overflows to a new page causing the script to break.
-
-[3] ~~One Gentoo user found that init system path was /sbin/init vs /user/bin/init causing the dmsg grep to fail. A possible cause for this is chosing a non-desktop profile.~~
-
-EDIT: Added additional pattern to handle this detection.
-
-[4] ~~If a user doesn't have an initramfs, the script fails.~~
-
-EDIT: Added check to bypass initramfs calculation if not detected.
+You can also use `sudo openrc-analyze use-elogind` if you have ec_logger enabled and want to use the fallback method. This is useful since rc_logger isn't very verbose and only lists times in full seconds. Personally, I prefer using elogind as an indicator of userspace being reached.
