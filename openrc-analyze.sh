@@ -1,8 +1,10 @@
 #!/bin/bash
 
-# OpenRC systemd-analyze equivalent script
-# Using dmesg timestamps, ACPI FPDT data, and OpenRC rc.log
+# OpenRC Analyze - By Aster (InvertedBug)
 
+# --------------
+# Initial checks
+# --------------
 detect_resume() {
     # Check if system was resumed from hibernation
     if dmesg | grep -q "PM: hibernation: hibernation exit"; then
@@ -30,6 +32,10 @@ is_rc_logger_enabled() {
         echo "disabled"
     fi
 }
+
+# --------------
+# Time Detection
+# --------------
 
 get_firmware_time() {
     # Firmware time: from power-on to bootloader launch
@@ -90,7 +96,7 @@ get_kernel_time() {
 
     # If no initramfs start found, then kernel ends when userspace starts directly
     if [ -z "$early_userspace_start" ]; then
-        early_userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+        early_userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root\|Run /sbin/init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
     fi
 
     if [ -n "$early_userspace_start" ]; then
@@ -103,7 +109,7 @@ get_kernel_time() {
 
 get_initramfs_time() {
     # Initramfs/early userspace starts at "Run /init as init process"
-    # Initramfs ends at "Running init: /sbin/init" or "Running init: /usr/bin/init" (handoff to main system)
+    # Initramfs ends at "Running init: /*" or "dracut: Switching root" (handoff to main system)
 
     local initramfs_start=$(dmesg | grep -i "Run /init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
@@ -114,7 +120,7 @@ get_initramfs_time() {
     fi
 
     # Look for possible init paths
-    local initramfs_end=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+    local initramfs_end=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root\|Run /sbin/init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     if [ -n "$initramfs_start" ] && [ -n "$initramfs_end" ]; then
         local duration_s=$(echo "scale=3; $initramfs_end - $initramfs_start" | bc -l 2>/dev/null)
@@ -134,8 +140,8 @@ get_openrc_times() {
         return 1
     fi
 
-    # 1. Use AWK to scan forward and capture the last *complete* boot sequence.
-    # We use a pipe delimiter (|) to output all lines in one go, which is safer than array splitting.
+    # 1 -- Use AWK to scan forward and capture the last *complete* boot sequence.
+    # I used a pipe delimiter (|) to output all lines in one go, which is safer than array splitting.
     local raw_output
     raw_output=$(awk '
         /rc boot logging started/    { bs=$0; b_stop=""; d_start=""; d_stop="" }
@@ -164,42 +170,42 @@ get_openrc_times() {
         return 1
     fi
 
-    # 2. Read the pipe-delimited string into variables
+    # 2 -- Read the pipe-delimited string into variables
     local IFS='|'
     read -r line_bs line_be line_ds line_de <<< "$raw_output"
     unset IFS
 
-    # 3. Extract date strings (columns 6-10 correspond to the timestamp format in your log)
+    # 3 -- Extract date strings (columns 6-10 correspond to the timestamp format in your log)
     local date_bs=$(echo "$line_bs" | awk '{print $6, $7, $8, $9, $10}')
     local date_be=$(echo "$line_be" | awk '{print $6, $7, $8, $9, $10}')
     local date_ds=$(echo "$line_ds" | awk '{print $6, $7, $8, $9, $10}')
     local date_de=$(echo "$line_de" | awk '{print $6, $7, $8, $9, $10}')
 
-    # 4. Convert to epoch seconds
+    # 4 -- Convert to epoch seconds
     local epoch_bs=$(date -d "$date_bs" +%s 2>/dev/null)
     local epoch_be=$(date -d "$date_be" +%s 2>/dev/null)
     local epoch_ds=$(date -d "$date_ds" +%s 2>/dev/null)
     local epoch_de=$(date -d "$date_de" +%s 2>/dev/null)
 
-    # 5. Validate dates
+    # 5 -- Validate dates
     if [ -z "$epoch_bs" ] || [ -z "$epoch_be" ] || [ -z "$epoch_ds" ] || [ -z "$epoch_de" ]; then
         echo "ERROR: Failed to parse OpenRC timestamps." >&2
         return 1
     fi
 
-    # 6. Calculate durations
+    # 6 -- Calculate durations
     local boot_duration=$((epoch_be - epoch_bs))
     local default_duration=$((epoch_de - epoch_ds))
     local total_userspace=$((epoch_de - epoch_bs))
 
-    # 7. Output: total_userspace,boot_duration,default_duration
+    # 7 -- Output variables
     echo "$total_userspace,$boot_duration,$default_duration"
 }
 
 get_userspace_time_fallback() {
     # Fallback method: Use elogind service start as userspace completion marker
 
-    local userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
+    local userspace_start=$(dmesg | grep -i "Running init: /sbin/init\|Running init: /usr/bin/init\|dracut: Switching root\|Run /sbin/init as init process" | head -1 | awk '{print $2}' | tr -d '[]' 2>/dev/null)
 
     if [ -z "$userspace_start" ]; then
         echo "ERROR: Cannot find userspace start marker in dmesg" >&2
@@ -236,9 +242,11 @@ get_userspace_time() {
     get_userspace_time_fallback
 }
 
-# Main execution
+# -----------------------
+# Checks before execution
+# -----------------------
 
-# Parse argument
+# Parse commandline arguments
 FORCE_ELOGIND=0
 if [ "$1" = "use-elogind" ]; then
     FORCE_ELOGIND=1
@@ -308,6 +316,10 @@ if [ "$initramfs_time" = "0" ]; then
 else
     initramfs_used=1
 fi
+
+# --------------
+# Main Execution
+# --------------
 
 # Calculate total time only if all components are available
 if [ $errors -eq 0 ]; then
